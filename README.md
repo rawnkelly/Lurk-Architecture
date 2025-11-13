@@ -1,8 +1,8 @@
-# Lurk - Real-time Social Media Monitoring Platform
+# Lurk - Real-time Trading Edge Discovery & Analysis Tool
 
 ## Overview
 
-Lurk is a SaaS platform that automates social media monitoring through intelligent agents called "Lurks". Instead of endless doomscrolling, users deploy Lurks to track specific topics, handles, or keywords across social platforms and receive curated, AI-summarized findings.
+Lurk is a SaaS tool that automates online monitoring through intelligent agents called "Lurks". Enabling traders to enhance their signal discovery capabilities among other functionality.
 
 ## Architecture
 
