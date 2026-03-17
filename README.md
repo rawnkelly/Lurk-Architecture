@@ -13,7 +13,6 @@ Performance Tracker
 
 The core differentiator is honest net spread after fees, not gross spread. The scanner, divergence panel, and fee drawer should all use one shared fee calculator as source of truth. Whale watching, leaderboards, public profiles, API access, paper trading, AI sentiment, and community extras are explicitly out of MVP.
 
-This matches the actual MVP direction: one terminal screen, no chart, no tab switch during execution, and no whale-watch/right-panel nonsense from the old architecture. The right panel is divergence plus threshold, not a separate product feature, and the left panel is Signal Search.
 
 Core Features
 1. Arb Scanner
