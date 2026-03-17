@@ -13,69 +13,6 @@ Performance Tracker
 
 The core differentiator is honest net spread after fees, not gross spread. The scanner, divergence panel, and fee drawer should all use one shared fee calculator as source of truth. Whale watching, leaderboards, public profiles, API access, paper trading, AI sentiment, and community extras are explicitly out of MVP.
 
-System Architecture
-┌──────────────────────────────────────────────────────────────────────┐
-│                     Frontend (Next.js 15)                           │
-│                                                                      │
-│  TopBar                                                              │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ Left toggle: Signal Search | Right toggle: Divergence Panel   │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  Main Terminal Screen                                                │
-│  ┌───────────────┬───────────────────────────────┬─────────────────┐ │
-│  │ Left Panel    │ Center Scanner Table          │ Right Panel     │ │
-│  │ Signal Search │ - Market name                 │ Divergence View │ │
-│  │ (hidden by    │ - Poly price                  │ + Threshold     │ │
-│  │ default on    │ - Kalshi price                │ always visible  │ │
-│  │ desktop)      │ - Net spread                  │ on desktop      │ │
-│  │               │ - Time detected               │                 │ │
-│  └───────────────┴───────────────────────────────┴─────────────────┘ │
-│                                                                      │
-│  Bottom Cockpit                                                      │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ Performance Tracker (collapsed summary → expandable history)   │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                     Next.js API Routes                               │
-│  /api/markets | /api/signal-search | /api/lurks |                   │
-│  /api/lurk-results | existing auth/billing routes                   │
-└──────────────────────────────────────────────────────────────────────┘
-                                 │
-                     ┌───────────┴───────────┐
-                     │                       │
-                     ▼                       ▼
-┌─────────────────────────────┐   ┌─────────────────────────────┐
-│ PostgreSQL / Supabase       │   │ Redis Cache Layer           │
-│ - market_mappings           │   │ - 3s market cache           │
-│ - market_data               │   │ - rate limiting             │
-│ - trade logs                │   │ - alert / queue support     │
-│ - signal search history     │   └─────────────────────────────┘
-│ - lurk usage counts         │
-│ - users / subscriptions     │
-└─────────────────────────────┘
-                     ▲
-                     │
-┌──────────────────────────────────────────────────────────────────────┐
-│                  Python Data Pipeline / Backend                      │
-│  - Polymarket ingestion                                              │
-│  - Kalshi ingestion                                                  │
-│  - Market mapping engine                                             │
-│  - Spread + fee calculation engine                                   │
-│  - Writes live rows to market_data                                   │
-└──────────────────────────────────────────────────────────────────────┘
-                     ▲
-                     │
-┌──────────────────────────────────────────────────────────────────────┐
-│                    External Data Sources                             │
-│  - Polymarket                                                        │
-│  - Kalshi API                                                        │
-│  - Claude web search for Signal Search                               │
-└──────────────────────────────────────────────────────────────────────┘
-
 This matches the actual MVP direction: one terminal screen, no chart, no tab switch during execution, and no whale-watch/right-panel nonsense from the old architecture. The right panel is divergence plus threshold, not a separate product feature, and the left panel is Signal Search.
 
 Core Features
