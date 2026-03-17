@@ -1,310 +1,387 @@
-# Lurk Terminal - Technical Architecture
+Lurk Terminal — Technical Architecture
+Overview
 
-## Overview
+Lurk Terminal is a real-time cross-platform prediction market terminal for Polymarket and Kalshi. The MVP is a single-screen execution environment built around four features:
 
-Lurk Terminal is an AI-powered trading terminal for prediction market arbitrage and whale tracking. The platform provides real-time price spreads between Polymarket and Kalshi, whale wallet monitoring, AI sentiment analysis, and performance tracking with public leaderboards.
+Arb Scanner
 
-**Core Value Proposition**: Users pay $29-99/month to spot arbitrage opportunities instantly, copy whale trades, get AI-powered market sentiment, and build verifiable trading history that creates network lock-in effects.
+Threshold Alerts
 
----
+Signal Search
 
-## System Architecture
+Performance Tracker
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Frontend (Next.js 15)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   Terminal   │  │  Leaderboard │  │ Performance  │      │
-│  │   Dashboard  │  │    Page      │  │   Tracking   │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Next.js API Routes                         │
-│  /api/markets | /api/whales | /api/performance | /api/lurks │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                ┌───────────┴───────────┐
-                │                       │
-                ▼                       ▼
-┌──────────────────────┐    ┌──────────────────────┐
-│  PostgreSQL/Supabase │    │   Redis Cache Layer  │
-│  - Market Data       │    │   - Rate Limiting    │
-│  - Performance       │    │   - 3sec Cache       │
-│  - User Wallets      │    │   - Queue Jobs       │
-│  - Subscriptions     │    └──────────────────────┘
-└──────────────────────┘
-                ▲
-                │
-┌───────────────┴────────────────┐
-│   Python Data Pipeline (24/7)  │
-│  ┌──────────────────────────┐  │
-│  │  polymarket_fetch.py     │  │
-│  │  - Alchemy Polygon RPC   │  │
-│  │  - Top 100 markets       │  │
-│  └──────────────────────────┘  │
-│  ┌──────────────────────────┐  │
-│  │  kalshi_fetch.py         │  │
-│  │  - WebSocket + REST API  │  │
-│  │  - Matching markets      │  │
-│  └──────────────────────────┘  │
-│  ┌──────────────────────────┐  │
-│  │  arb_calculator.py       │  │
-│  │  - Spread calculation    │  │
-│  │  - Write to DB every 1-3s│  │
-│  └──────────────────────────┘  │
-└─────────────────────────────────┘
-                ▲
-                │
-┌───────────────┴────────────────┐
-│    External Data Sources        │
-│  - Polymarket (Polygon)        │
-│  - Kalshi API                  │
-│  - Social Media (Lurk infra)   │
-└─────────────────────────────────┘
-```
+The core differentiator is honest net spread after fees, not gross spread. The scanner, divergence panel, and fee drawer should all use one shared fee calculator as source of truth. Whale watching, leaderboards, public profiles, API access, paper trading, AI sentiment, and community extras are explicitly out of MVP.
 
----
+System Architecture
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Frontend (Next.js 15)                           │
+│                                                                      │
+│  TopBar                                                              │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ Left toggle: Signal Search | Right toggle: Divergence Panel   │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  Main Terminal Screen                                                │
+│  ┌───────────────┬───────────────────────────────┬─────────────────┐ │
+│  │ Left Panel    │ Center Scanner Table          │ Right Panel     │ │
+│  │ Signal Search │ - Market name                 │ Divergence View │ │
+│  │ (hidden by    │ - Poly price                  │ + Threshold     │ │
+│  │ default on    │ - Kalshi price                │ always visible  │ │
+│  │ desktop)      │ - Net spread                  │ on desktop      │ │
+│  │               │ - Time detected               │                 │ │
+│  └───────────────┴───────────────────────────────┴─────────────────┘ │
+│                                                                      │
+│  Bottom Cockpit                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ Performance Tracker (collapsed summary → expandable history)   │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Next.js API Routes                               │
+│  /api/markets | /api/signal-search | /api/lurks |                   │
+│  /api/lurk-results | existing auth/billing routes                   │
+└──────────────────────────────────────────────────────────────────────┘
+                                 │
+                     ┌───────────┴───────────┐
+                     │                       │
+                     ▼                       ▼
+┌─────────────────────────────┐   ┌─────────────────────────────┐
+│ PostgreSQL / Supabase       │   │ Redis Cache Layer           │
+│ - market_mappings           │   │ - 3s market cache           │
+│ - market_data               │   │ - rate limiting             │
+│ - trade logs                │   │ - alert / queue support     │
+│ - signal search history     │   └─────────────────────────────┘
+│ - lurk usage counts         │
+│ - users / subscriptions     │
+└─────────────────────────────┘
+                     ▲
+                     │
+┌──────────────────────────────────────────────────────────────────────┐
+│                  Python Data Pipeline / Backend                      │
+│  - Polymarket ingestion                                              │
+│  - Kalshi ingestion                                                  │
+│  - Market mapping engine                                             │
+│  - Spread + fee calculation engine                                   │
+│  - Writes live rows to market_data                                   │
+└──────────────────────────────────────────────────────────────────────┘
+                     ▲
+                     │
+┌──────────────────────────────────────────────────────────────────────┐
+│                    External Data Sources                             │
+│  - Polymarket                                                        │
+│  - Kalshi API                                                        │
+│  - Claude web search for Signal Search                               │
+└──────────────────────────────────────────────────────────────────────┘
 
-## Core Features
+This matches the actual MVP direction: one terminal screen, no chart, no tab switch during execution, and no whale-watch/right-panel nonsense from the old architecture. The right panel is divergence plus threshold, not a separate product feature, and the left panel is Signal Search.
 
-### 1. Arbitrage Scanner
-Real-time price spread detection between Polymarket and Kalshi.
+Core Features
+1. Arb Scanner
 
-**How it works:**
-- Python script fetches prices from both platforms every 1-3 seconds
-- Calculates spread percentage for matched markets
-- Pushes clean data to PostgreSQL
-- Frontend polls `/api/markets` every 3 seconds
-- Displays in Bloomberg-style terminal grid
+Real-time fee-adjusted net spread detection between Polymarket and Kalshi.
 
-**Terminal Columns:**
-```
-TICKER | EVENT_CONTRACT | POLY (ODDS) | KALSHI (ODDS) | ARB % | 24H VOL
-```
+How it works:
 
-**Paywall:** Starter users see full data with no delays. Pro users get API access for automated execution.
+backend ingests and normalizes both markets
 
-### 2. Whale Watching
-Track known whale wallets and user performance leaderboard.
+mapping engine pairs equivalent contracts
 
-**Whale Wallet System:**
-- Curated list of 50 known whale wallets (Polymarket power traders)
-- Background job scans wallet history via Polygon RPC
-- Calculates P&L metrics (volume if P&L too complex initially)
-- Displays last 5-10 trades for Pro users
+spread engine computes gross and net
 
-**User Wallet Connection:**
-- RainbowKit integration for wallet linking
-- Automatic position history import
-- Performance metrics: Win rate %, total P&L, accuracy by category
-- Leaderboard ranking based on verified performance
+market rows are written to market_data
 
-### 3. AI Sentiment Analysis (Lurk Infrastructure)
-Existing lurk system becomes the intelligence layer for prediction markets.
+frontend refreshes every 3 seconds
 
-**Integration:**
-1. User creates lurk for market topic (e.g., "Trump 2024")
-2. Scraper fetches social media mentions (manual → automated over time)
-3. AI processes sentiment via Anthropic API at `/api/ai/process`
-4. Sentiment score displays in Terminal alongside arb data
-5. Example: "Polymarket 52% | Kalshi 48% | Spread 4% | **Sentiment -15% (bearish)**"
+scanner is sorted by net spread descending
 
-**The Alpha:** Market prices lag sentiment. If Twitter crashes but prices haven't moved, that's the edge.
+Scanner columns:
 
-### 4. Performance Tracking & Network Lock-In
-Users build verifiable prediction history that creates switching costs.
+Market name
 
-**Metrics Tracked:**
-- Win rate %
-- Total P&L
-- Accuracy by market category
-- Position history with entry/exit prices
-- Time-weighted performance
+Polymarket price
 
-**Lock-In Mechanism:**
-- Starter: 3-month history
-- Pro: 2-year history
-- Losing 12-18 months of verified performance = can't leave without losing credibility
-- Export/share functionality (screenshot-friendly for flexing)
+Kalshi price
 
-### 5. Copy Trading (Pro Feature)
-Auto-follow whale positions in real-time.
+Net spread
 
-**Workflow:**
-1. Pro user selects whale to follow from leaderboard
-2. System monitors whale wallet via Polygon RPC
-3. When whale enters position, triggers notification/webhook
-4. User can manually mirror or (future) auto-execute via API
+Time detected
 
-### 6. Staked Buying Power Program (Pro Feature)
-Prop trading model where Lurk provides capital, user trades, profits split.
+Color logic:
 
-**How it works:**
-- Pro users qualify based on performance metrics
-- Lurk provides contractual buying power (no actual capital fronted)
-- User makes predictions with "house money"
-- Winners get 70-80% of profits, Lurk gets 20-30%
-- Losing traders (Starter tier) subsidize winning traders (Pro tier)
-- Insane retention: winners never leave because they're trading free capital
+green if above threshold
 
-**Legal Structure:**
-- Profit-sharing agreement (not investment)
-- "Educational capital allocation" framing
-- Winner gets majority split, platform gets minority
-- Risk parameters enforced
+grey if below threshold
 
----
+never red
 
-## Database Schema
+Starter users see only the first few rows clearly; rows below are blurred with upgrade treatment.
 
-### Existing Tables (Already Built)
-```sql
-users (
-  id, email, clerk_id,
-  is_admin, is_pro,
-  created_at, updated_at
-)
+2. Threshold Alerts
 
-subscriptions (
-  id, user_id, stripe_subscription_id,
-  plan_tier, status, current_period_end,
-  created_at, updated_at
-)
+Single-number alert threshold, defaulting to 5%.
 
-lurks (
-  id, user_id, name, type,
-  search_terms, platforms, frequency,
-  last_lurked_at, metadata
-)
+Behavior:
 
-lurk_results (
-  id, lurk_id, content,
-  sentiment_score, entities,
-  engagement_metrics, created_at
-)
+no save button
 
-user_preferences (
-  id, user_id, preferences_json
-)
-```
+updates on change
 
-### New Tables (Need to Build)
+email alerts for Starter
 
-```sql
-CREATE TABLE market_data (
-  id UUID PRIMARY KEY,
-  polymarket_id TEXT,
-  kalshi_id TEXT,
-  event_name TEXT,
-  poly_price DECIMAL,
-  kalshi_price DECIMAL,
-  spread_percent DECIMAL,
-  volume_24h BIGINT,
-  last_updated TIMESTAMP
-);
+mobile push for paid tiers
 
-CREATE TABLE market_mappings (
-  id UUID PRIMARY KEY,
-  polymarket_id TEXT UNIQUE,
-  kalshi_id TEXT UNIQUE,
-  event_name TEXT,
-  bet_type TEXT,
-  created_at TIMESTAMP
-);
+alert deep-links directly into the relevant market row pre-expanded
 
-CREATE TABLE performance_history (
-  id UUID PRIMARY KEY,
-  user_id TEXT,
-  market_id UUID REFERENCES market_data(id),
-  prediction TEXT,
-  entry_price DECIMAL,
-  exit_price DECIMAL,
-  outcome TEXT,
-  pnl DECIMAL,
-  created_at TIMESTAMP
-);
+This lives in the bottom section of the right panel, not on a separate page.
 
-CREATE TABLE whale_wallets (
-  id UUID PRIMARY KEY,
-  wallet_address TEXT UNIQUE,
-  nickname TEXT,
-  total_volume BIGINT,
-  win_rate DECIMAL,
-  last_trade_at TIMESTAMP,
-  is_verified BOOLEAN DEFAULT false
-);
+3. Signal Search
 
-CREATE TABLE user_wallets (
-  id UUID PRIMARY KEY,
-  user_id TEXT,
-  wallet_address TEXT UNIQUE,
-  connected_at TIMESTAMP,
-  last_synced_at TIMESTAMP
-);
+Claude-powered web search summarized by topic / keyword.
 
-CREATE TABLE leaderboard_entries (
-  id UUID PRIMARY KEY,
-  user_id TEXT,
-  rank INTEGER,
-  total_pnl DECIMAL,
-  win_rate DECIMAL,
-  total_trades INTEGER,
-  last_updated TIMESTAMP
-);
+Behavior:
 
-CREATE TABLE copy_trade_follows (
-  id UUID PRIMARY KEY,
-  follower_user_id TEXT,
-  whale_wallet_id UUID REFERENCES whale_wallets(id),
-  auto_execute BOOLEAN DEFAULT false,
-  created_at TIMESTAMP
-);
-```
+opened from the left panel
 
----
+panel shows saved searches and inline results
 
-## Technical Stack
+platform selector changes prompt bias, not infrastructure
 
-### Frontend
-- **Next.js 15** (App Router)
-- **React 19**
-- **Tailwind CSS + shadcn/ui** (Terminal aesthetic)
-- **TanStack Table** for arb scanner grid
-- **RainbowKit** for wallet connections
-- **Recharts** for performance visualizations
+usage tracked monthly by plan
 
-### Backend
-- **Python FastAPI** (or scripts) for blockchain data ingestion
-- **PostgreSQL via Supabase** for all data storage
-- **Redis** for caching (3-second cache on market data) and rate limiting
-- **Bull/BullMQ** for job queue processing
-- **Anthropic Claude API** for AI summaries/sentiment (already integrated)
+Starter gets limited free usage, paid tiers get more capacity
 
-### Data Sources
-- **Polymarket**: Polygon RPC via Alchemy (listening to Gnosis CTF contract events)
-- **Kalshi**: WebSocket + REST API (official)
-- **Social Media**: Existing lurk scraping infrastructure for sentiment
+This is the research layer, not the main execution surface.
 
-### Infrastructure
-- **Vercel** (Next.js deployment)
-- **Railway/DigitalOcean** (Python script 24/7 runner)
-- **Supabase** (PostgreSQL + connection pooling)
-- **Clerk Auth** (already set up)
-- **Stripe** (subscriptions, webhooks - already integrated)
-- **Resend** (email delivery - already in codebase)
+4. Performance Tracker
 
----
+Automatic trade logging and performance history.
 
-## What's Already Built
+Behavior:
 
-✅ Database tables: `users`, `subscriptions`, `lurks`, `lurk_results`, `user_preferences`
-✅ Lurk CRUD API routes at `/api/lurks`
-✅ Dashboard connected to lurk APIs
-✅ Admin panel UI at `/admin`
-✅ AI processing endpoint at `/api/ai/process` (Anthropic API)
-✅ Lurk results saving endpoint at `/api/lurk-results`
-✅ Clerk authentication system
-✅ Stripe payment integration
-✅ Resend email service in codebase
+collapsed bottom cockpit is always visible
+
+expands into a fuller trade history view
+
+no manual journaling required
+
+tracks total P&L, win rate, average net spread captured, and trade count
+
+“Log this trade” is triggered from divergence panel / fee drawer
+
+This is part of the same terminal screen, not a separate product area.
+
+Screen Layout
+Left Panel — Signal Search
+
+hidden by default on desktop
+
+opened from TopBar
+
+overlays on mobile
+
+contains saved searches, create-new button, inline results
+
+replaces old signal feed concept
+
+Center — Scanner Table
+
+owns the main center space
+
+no chart in MVP
+
+clicking a row opens the fee breakdown drawer
+
+refreshes every 3 seconds
+
+sorted by net spread descending
+
+Right Panel — Divergence + Threshold
+
+always visible on desktop
+
+slide-out on mobile
+
+top section shows selected market:
+
+Polymarket price
+
+Kalshi price
+
+gross spread
+
+fee breakdown
+
+net spread
+
+log trade CTA
+
+bottom section contains threshold input
+
+Bottom Cockpit — Performance
+
+collapsed summary always visible
+
+expands to trade history and stat cards
+
+Starter banner can live inline here later
+
+That is the real terminal composition. No second tab belongs in this doc.
+
+Database Schema
+Existing tables already in the product
+
+users
+
+subscriptions
+
+lurks
+
+lurk_results
+
+user_preferences
+
+Terminal / scanner tables
+
+The live pipeline status doc reflects the current backend reality:
+
+market_mappings
+
+active source of truth for monitored pairs
+
+market_data
+
+live spread rows written by main.py
+
+candidate_matches
+
+AI matching pipeline results
+
+raw_markets
+
+stored active Polymarket markets
+
+The current pipeline has 77 active mappings loaded into the live loop, and market_data is now receiving filtered live output after the Kalshi normalization fix.
+
+You should also keep / add application-layer tables for:
+
+trade logs
+
+signal search history
+
+lurk usage counts
+
+Those align with the MVP infrastructure list.
+
+Technical Stack
+Frontend
+
+Next.js 15
+
+React 19
+
+Tailwind CSS + shadcn/ui
+
+TanStack Table for scanner
+
+existing auth/billing UI stack
+
+Backend
+
+Python data pipeline for ingestion, mapping, spread computation
+
+Next.js API routes for app-facing endpoints
+
+PostgreSQL / Supabase
+
+Redis for caching and throttling
+
+Claude-powered Signal Search
+
+Data Sources
+
+Polymarket
+
+Kalshi API
+
+Claude web search for Signal Search
+
+Infrastructure
+
+Vercel for frontend
+
+long-running Python worker for live pipeline
+
+Supabase for DB
+
+Clerk for auth
+
+Stripe for billing
+
+Resend for email alerts
+
+This is the actual MVP-shaped stack, not the older whale/copy-trading/leaderboard architecture.
+
+What’s Already Working
+
+From the current pipeline status:
+
+Polymarket ingestion
+
+Kalshi ingestion
+
+market mapping engine
+
+live pass across 77 active mappings
+
+quality filtering
+
+DB upsert into market_data
+
+first successful quality-passing spread detection
+
+That means the backend is now alive enough to support terminal integration, though it still needs fee-adjusted net spread as the frontend-facing truth.
+
+Critical Remaining Gap
+
+The main remaining product gap is still:
+
+gross spread vs. net spread
+
+The MVP spec requires:
+
+net spread in the scanner
+
+fee breakdown in the divergence panel
+
+fee breakdown in the drawer
+
+one shared fee-calculator.ts utility used everywhere
+
+Until that is wired through, the backend is useful but not yet product-correct.
+
+Explicitly Out of MVP
+
+Remove these from the architecture doc entirely:
+
+leaderboards
+
+public profiles
+
+whale watching
+
+copy trading
+
+raw API access
+
+paper trading
+
+AI sentiment
+
+community beyond events
+
+Lurk AI as an active MVP feature
+
+Those are explicitly out of MVP.
